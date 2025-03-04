@@ -259,7 +259,7 @@ export default function App() {
               >
                 {message.replyTo && (
                   <div className="reply-preview">
-                    <p>↪ {getMessageById(message.replyTo)?.text.slice(0, 30)}{getMessageById(message.replyTo)?.text.length > 30 ? '...' : ''}</p>
+                    <p>↪ {getMessageById(message.replyTo)?.text?.slice(0, 30) || ''}{(getMessageById(message.replyTo)?.text?.length || 0) > 30 ? '...' : ''}</p>
                   </div>
                 )}
                 
@@ -287,7 +287,7 @@ export default function App() {
           <div className="message-input-container">
             {replyingTo && (
               <div className="reply-container">
-                <p>Replying to: {getMessageById(replyingTo)?.text.slice(0, 30)}{getMessageById(replyingTo)?.text.length > 30 ? '...' : ''}</p>
+                <p>Replying to: {getMessageById(replyingTo)?.text?.slice(0, 30) || ''}{(getMessageById(replyingTo)?.text?.length || 0) > 30 ? '...' : ''}</p>
                 <button onClick={() => setReplyingTo(null)} className="cancel-reply-btn">×</button>
               </div>
             )}
