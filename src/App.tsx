@@ -5,8 +5,8 @@ import { format } from 'date-fns';
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, onValue, set, push, update, remove } from 'firebase/database';
 import './App.css';
-import { Picker } from '@emoji-mart/react';
-import data from '@emoji-mart/data';
+import Picker from 'emoji-mart/dist/components/picker/nimble-picker';
+import data from 'emoji-mart/data/all.json';
 import { FiSend, FiImage, FiLogOut, FiTrash2, FiX } from 'react-icons/fi';
 import { BsEmojiSmile, BsCheck2, BsCheck2All } from 'react-icons/bs';
 import { RiChatSmile2Fill } from 'react-icons/ri';
@@ -396,11 +396,12 @@ export default function App() {
             {showEmojiPicker && (
               <div className="emoji-picker-container">
                 <Picker 
-                  data={data} 
-                  onEmojiSelect={addEmoji}
+                  set="apple"
+                  title="Pick an emoji"
+                  emoji="point_up"
                   theme="dark"
-                  previewPosition="none"
-                  skinTonePosition="none"
+                  style={{ width: '100%' }}
+                  onSelect={addEmoji}
                 />
               </div>
             )}
