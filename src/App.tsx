@@ -5,6 +5,12 @@ import { format } from 'date-fns';
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, onValue, set, push, update, remove } from 'firebase/database';
 import './App.css';
+import { Picker } from '@emoji-mart/react';
+import data from '@emoji-mart/data';
+import { FiSend, FiImage, FiLogOut, FiTrash2, FiX } from 'react-icons/fi';
+import { BsEmojiSmile, BsCheck2, BsCheck2All } from 'react-icons/bs';
+import { RiChatSmile2Fill } from 'react-icons/ri';
+import { BiReply } from 'react-icons/bi';
 
 // Initialize Firebase
 const firebaseConfig = {
@@ -37,10 +43,17 @@ interface TypingStatus {
   B: boolean;
 }
 
+// Define user status type
+interface UserStatus {
+  online: boolean;
+  lastSeen: string;
+}
+
 export default function App() {
   // User state
   const [user, setUser] = useState<'R' | 'B' | null>(null);
   const [showLogin, setShowLogin] = useState(true);
+  const [otherUserStatus, setOtherUserStatus] = useState<UserStatus | null>(null);
   
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
@@ -66,7 +79,7 @@ export default function App() {
     }
   }, []);
   
-  // Listen for messages when user is set
+  // Listen for messages and user status when user is set
   useEffect(() => {
     if (!user) return;
     
@@ -103,10 +116,20 @@ export default function App() {
     const userRef = ref(database, `users/${user}`);
     set(userRef, { online: true, lastSeen: new Date().toISOString() });
     
+    // Listen for other user's status
+    const otherUserRef = ref(database, `users/${user === 'R' ? 'B' : 'R'}`);
+    const unsubscribeUserStatus = onValue(otherUserRef, (snapshot) => {
+      const data = snapshot.val() as UserStatus;
+      if (data) {
+        setOtherUserStatus(data);
+      }
+    });
+    
     // Clean up on unmount
     return () => {
       unsubscribeMessages();
       unsubscribeTyping();
+      unsubscribeUserStatus();
       set(userRef, { online: false, lastSeen: new Date().toISOString() });
     };
   }, [user, database]);
@@ -231,36 +254,86 @@ export default function App() {
     return format(new Date(timestamp), 'HH:mm');
   };
   
+  // Format last seen time
+  const formatLastSeen = (timestamp: string) => {
+    const now = new Date();
+    const lastSeenDate = new Date(timestamp);
+    
+    const diffInHours = Math.abs(now.getTime() - lastSeenDate.getTime()) / 36e5;
+    
+    if (diffInHours < 24) {
+      return `Last seen today at ${format(lastSeenDate, 'HH:mm')}`;
+    } else if (diffInHours < 48) {
+      return `Last seen yesterday at ${format(lastSeenDate, 'HH:mm')}`;
+    } else {
+      return `Last seen on ${format(lastSeenDate, 'MMM d, yyyy')}`;
+    }
+  };
+  
   // Add emoji to message
-  const addEmoji = (emoji: string) => {
-    setNewMessage(prev => prev + emoji);
+  const addEmoji = (emoji: any) => {
+    setNewMessage(prev => prev + emoji.native);
+    setShowEmojiPicker(false);
     messageInputRef.current?.focus();
   };
   
-  // Common emojis
-  const commonEmojis = ['😊', '😂', '❤️', '👍', '🙏', '😍', '🔥', '😎', '🤔', '👋', '😢', '🎉', '👏', '🌟', '💯', '💪', '🤗', '👀', '🙄', '😴'];
+  // Get other user name
+  const getOtherUserName = () => {
+    return user === 'R' ? 'User B' : 'User A';
+  };
+  
+  // Typing indicator animation
+  const renderTypingIndicator = () => {
+    return (
+      <div className="typing-indicator-dots">
+        <span className="dot"></span>
+        <span className="dot"></span>
+        <span className="dot"></span>
+      </div>
+    );
+  };
   
   return (
     <main className="chat-container">
       {showLogin ? (
         <div className="login-screen">
-          <h1>Select User</h1>
-          <div className="user-buttons">
-            <button onClick={() => handleLogin('R')} className="user-r">User R</button>
-            <button onClick={() => handleLogin('B')} className="user-b">User B</button>
+          <div className="login-card">
+            <RiChatSmile2Fill className="login-logo" />
+            <h1>Chat App</h1>
+            <p>Choose who you want to be</p>
+            <div className="user-buttons">
+              <button onClick={() => handleLogin('R')} className="user-r">User A</button>
+              <button onClick={() => handleLogin('B')} className="user-b">User B</button>
+            </div>
           </div>
         </div>
       ) : (
         <>
           <header className="chat-header">
-            <h2>Chat {user === 'R' ? 'R' : 'B'}</h2>
-            {otherUserTyping && <div className="typing-indicator">User {user === 'R' ? 'B' : 'R'} is typing...</div>}
-            <button onClick={handleLogout} className="logout-btn">
-              <i className="icon-logout"></i>
-            </button>
-            <button onClick={handleClearChat} className="clear-chat-btn">
-              <i className="icon-trash"></i>
-            </button>
+            <div className="user-info">
+              <div className="user-avatar">
+                {user === 'R' ? 'A' : 'B'}
+                <span className={`status-indicator ${otherUserStatus?.online ? 'online' : 'offline'}`}></span>
+              </div>
+              <div className="user-details">
+                <h2>{getOtherUserName()}</h2>
+                <p className="status-text">
+                  {otherUserStatus?.online ? (
+                    otherUserTyping ? 'typing...' : 'online'
+                  ) : (
+                    otherUserStatus?.lastSeen ? formatLastSeen(otherUserStatus.lastSeen) : 'offline'
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="header-actions">
+              <button onClick={handleClearChat} className="icon-btn clear-chat-btn" title="Clear chat">
+                <FiTrash2 />
+              </button>
+              <button onClick={handleLogout} className="icon-btn logout-btn" title="Logout">
+                <FiLogOut />
+              </button>
+            </div>
           </header>
           
           <div className="messages-container">
@@ -268,11 +341,11 @@ export default function App() {
               <div 
                 key={message.id} 
                 className={`message ${message.sender === user ? 'sent' : 'received'}`}
-                onDoubleClick={() => handleReply(message.id)}
               >
                 {message.replyTo && (
                   <div className="reply-preview">
-                    <p>↪ {getMessageById(message.replyTo)?.text?.slice(0, 30) || ''}{(getMessageById(message.replyTo)?.text?.length || 0) > 30 ? '...' : ''}</p>
+                    <BiReply className="reply-icon" />
+                    <p>{getMessageById(message.replyTo)?.text?.slice(0, 30) || ''}{(getMessageById(message.replyTo)?.text?.length || 0) > 30 ? '...' : ''}</p>
                   </div>
                 )}
                 
@@ -288,10 +361,13 @@ export default function App() {
                   <span className="timestamp">{formatTime(message.timestamp)}</span>
                   {message.sender === user && (
                     <span className={`read-receipt ${message.seen ? 'seen' : ''}`}>
-                      {message.seen ? '✓✓' : '✓'}
+                      {message.seen ? <BsCheck2All /> : <BsCheck2 />}
                     </span>
                   )}
                 </div>
+                <button className="reply-button" onClick={() => handleReply(message.id)}>
+                  <BiReply />
+                </button>
               </div>
             ))}
             <div ref={messagesEndRef} />
@@ -300,35 +376,42 @@ export default function App() {
           <div className="message-input-container">
             {replyingTo && (
               <div className="reply-container">
+                <BiReply className="reply-icon" />
                 <p>Replying to: {getMessageById(replyingTo)?.text?.slice(0, 30) || ''}{(getMessageById(replyingTo)?.text?.length || 0) > 30 ? '...' : ''}</p>
-                <button onClick={() => setReplyingTo(null)} className="cancel-reply-btn">×</button>
+                <button onClick={() => setReplyingTo(null)} className="cancel-reply-btn">
+                  <FiX />
+                </button>
               </div>
             )}
             
             {selectedMedia && (
               <div className="media-preview">
                 <img src={selectedMedia} alt="Media preview" className="media-preview-img" />
-                <button onClick={() => setSelectedMedia(null)} className="cancel-media-btn">×</button>
+                <button onClick={() => setSelectedMedia(null)} className="cancel-media-btn">
+                  <FiX />
+                </button>
               </div>
             )}
             
             {showEmojiPicker && (
-              <div className="emoji-picker">
-                {commonEmojis.map(emoji => (
-                  <button 
-                    key={emoji} 
-                    className="emoji-btn" 
-                    onClick={() => addEmoji(emoji)}
-                  >
-                    {emoji}
-                  </button>
-                ))}
+              <div className="emoji-picker-container">
+                <Picker 
+                  data={data} 
+                  onEmojiSelect={addEmoji}
+                  theme="dark"
+                  previewPosition="none"
+                  skinTonePosition="none"
+                />
               </div>
             )}
             
             <div className="input-container">
-              <button onClick={() => fileInputRef.current?.click()} className="media-btn">
-                <i className="icon-image"></i>
+              <button 
+                onClick={() => fileInputRef.current?.click()} 
+                className="input-action-btn media-btn"
+                title="Send image"
+              >
+                <FiImage />
               </button>
               <input 
                 type="file"
@@ -340,9 +423,10 @@ export default function App() {
               
               <button 
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
-                className="emoji-toggle-btn"
+                className={`input-action-btn emoji-toggle-btn ${showEmojiPicker ? 'active' : ''}`}
+                title="Select emoji"
               >
-                <i className="icon-emoji"></i>
+                <BsEmojiSmile />
               </button>
               
               <textarea
@@ -355,8 +439,13 @@ export default function App() {
                 rows={1}
               />
               
-              <button onClick={handleSendMessage} className="send-btn">
-                <i className="icon-send"></i>
+              <button 
+                onClick={handleSendMessage} 
+                className={`input-action-btn send-btn ${newMessage.trim() || selectedMedia ? 'active' : ''}`}
+                disabled={!newMessage.trim() && !selectedMedia}
+                title="Send message"
+              >
+                <FiSend />
               </button>
             </div>
           </div>

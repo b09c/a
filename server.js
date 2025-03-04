@@ -10,8 +10,14 @@ const __dirname = dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 
-// Serve static files
-app.use(express.static(join(__dirname, 'dist')));
+// Serve static files with proper MIME types
+app.use(express.static(join(__dirname, 'dist'), {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    }
+  }
+}));
 
 // Fall back to index.html for SPA routing
 app.get('*', (req, res) => {
