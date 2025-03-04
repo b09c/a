@@ -17,3 +17,14 @@ publicDir = "dist"
 [[ports]]
 localPort = 5173
 externalPort = 80
+
+[workflows]
+runButton = "Run"
+
+[[workflows.workflow]]
+name = "Run"
+author = 40196578
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
