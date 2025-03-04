@@ -1,9 +1,24 @@
 
 import { useState, useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, onValue, set, push, update, remove } from 'firebase/database';
 import './App.css';
+
+// Initialize Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyCmqS52ypihassF4hYlFnfNr5VMxxlYsis",
+  authDomain: "project-6a7c4.firebaseapp.com",
+  databaseURL: "https://project-6a7c4-default-rtdb.firebaseio.com",
+  projectId: "project-6a7c4",
+  storageBucket: "project-6a7c4.appspot.com",
+  messagingSenderId: "152367969169",
+  appId: "1:152367969169:web:6bc05a9d8152391e07e030"
+};
+
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
 
 // Define message type
 interface Message {
@@ -16,11 +31,16 @@ interface Message {
   media?: string;
 }
 
+// Define typing status type
+interface TypingStatus {
+  R: boolean;
+  B: boolean;
+}
+
 export default function App() {
   // User state
   const [user, setUser] = useState<'R' | 'B' | null>(null);
   const [showLogin, setShowLogin] = useState(true);
-  const [socket, setSocket] = useState<Socket | null>(null);
   
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
@@ -29,13 +49,14 @@ export default function App() {
   const [otherUserTyping, setOtherUserTyping] = useState(false);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Connect to socket on mount
+  // Connect to Firebase on mount
   useEffect(() => {
     // Check for saved user
     const savedUser = localStorage.getItem('chatUser');
@@ -43,106 +64,84 @@ export default function App() {
       setUser(savedUser);
       setShowLogin(false);
     }
-    
-    // Connect to the socket server
-    const socketConnection = io(window.location.hostname === 'localhost' 
-      ? 'http://localhost:3000' 
-      : window.location.origin);
-    
-    setSocket(socketConnection);
-    
-    return () => {
-      socketConnection.disconnect();
-    };
   }, []);
   
-  // Handle socket events when socket and user are set
+  // Listen for messages when user is set
   useEffect(() => {
-    if (!socket || !user) return;
+    if (!user) return;
     
-    // Login
-    socket.emit('login', user);
-    
-    // Login response handlers
-    socket.on('login-success', (data) => {
-      setMessages(data.chatHistory);
-      localStorage.setItem('chatUser', user);
-    });
-    
-    socket.on('login-error', (error) => {
-      alert(error);
-      setUser(null);
-      setShowLogin(true);
-      localStorage.removeItem('chatUser');
-    });
-    
-    // Message handlers
-    socket.on('new-message', (message: Message) => {
-      setMessages(prev => [...prev, message]);
-      socket.emit('message-seen', message.id);
-    });
-    
-    socket.on('message-seen', (messageId: string) => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === messageId ? { ...msg, seen: true } : msg
-      ));
-    });
-    
-    // Typing indicator
-    socket.on('user-typing', (data: { userId: 'R' | 'B', isTyping: boolean }) => {
-      if (data.userId !== user) {
-        setOtherUserTyping(data.isTyping);
+    // Get chat history from Firebase
+    const messagesRef = ref(database, 'messages');
+    const unsubscribeMessages = onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const messageList = Object.values(data) as Message[];
+        setMessages(messageList.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
+        
+        // Mark messages as seen
+        messageList.forEach(msg => {
+          if (msg.sender !== user && !msg.seen) {
+            const messageRef = ref(database, `messages/${msg.id}`);
+            update(messageRef, { seen: true });
+          }
+        });
+      } else {
+        setMessages([]);
       }
     });
     
-    // Chat deleted
-    socket.on('chat-deleted', () => {
-      setMessages([]);
+    // Listen for typing status
+    const typingRef = ref(database, 'typing');
+    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
+      const data = snapshot.val() as TypingStatus;
+      if (data) {
+        setOtherUserTyping(user === 'R' ? data.B : data.R);
+      }
     });
     
-    // Connection status
-    socket.on('user-connected', (userId) => {
-      console.log(`User ${userId} connected`);
-    });
+    // Set user online status
+    const userRef = ref(database, `users/${user}`);
+    set(userRef, { online: true, lastSeen: new Date().toISOString() });
     
-    socket.on('user-disconnected', (userId) => {
-      console.log(`User ${userId} disconnected`);
-    });
-    
+    // Clean up on unmount
     return () => {
-      socket.off('login-success');
-      socket.off('login-error');
-      socket.off('new-message');
-      socket.off('message-seen');
-      socket.off('user-typing');
-      socket.off('chat-deleted');
-      socket.off('user-connected');
-      socket.off('user-disconnected');
+      unsubscribeMessages();
+      unsubscribeTyping();
+      set(userRef, { online: false, lastSeen: new Date().toISOString() });
     };
-  }, [socket, user]);
+  }, [user, database]);
   
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+  
+  // Handle typing status
+  useEffect(() => {
+    if (!user) return;
     
-    // Mark received messages as seen
-    if (socket && user) {
-      messages.forEach(msg => {
-        if (msg.sender !== user && !msg.seen) {
-          socket.emit('message-seen', msg.id);
-        }
-      });
-    }
-  }, [messages, socket, user]);
+    const typingRef = ref(database, `typing/${user}`);
+    set(typingRef, isTyping);
+    
+    return () => {
+      set(typingRef, false);
+    };
+  }, [isTyping, user, database]);
   
   // Handle login
   const handleLogin = (selectedUser: 'R' | 'B') => {
     setUser(selectedUser);
     setShowLogin(false);
+    localStorage.setItem('chatUser', selectedUser);
   };
   
   // Handle logout
   const handleLogout = () => {
+    if (user) {
+      const userRef = ref(database, `users/${user}`);
+      set(userRef, { online: false, lastSeen: new Date().toISOString() });
+    }
+    
     localStorage.removeItem('chatUser');
     setUser(null);
     setShowLogin(true);
@@ -151,10 +150,11 @@ export default function App() {
   
   // Handle sending a message
   const handleSendMessage = () => {
-    if (!socket || !user || (!newMessage.trim() && !selectedMedia)) return;
+    if (!user || (!newMessage.trim() && !selectedMedia)) return;
     
+    const messageId = uuidv4();
     const message: Message = {
-      id: uuidv4(),
+      id: messageId,
       sender: user,
       text: newMessage.trim(),
       timestamp: new Date().toISOString(),
@@ -163,14 +163,16 @@ export default function App() {
       ...(selectedMedia && { media: selectedMedia }),
     };
     
-    socket.emit('send-message', message);
-    setMessages(prev => [...prev, message]);
+    // Save message to Firebase
+    const messageRef = ref(database, `messages/${messageId}`);
+    set(messageRef, message);
+    
     setNewMessage('');
     setReplyingTo(null);
     setSelectedMedia(null);
+    setShowEmojiPicker(false);
     
     // Reset typing indicator
-    socket.emit('typing', false);
     setIsTyping(false);
   };
   
@@ -180,10 +182,8 @@ export default function App() {
     
     if (!isTyping && e.target.value.length > 0) {
       setIsTyping(true);
-      socket?.emit('typing', true);
     } else if (isTyping && e.target.value.length === 0) {
       setIsTyping(false);
-      socket?.emit('typing', false);
     }
   };
   
@@ -221,8 +221,8 @@ export default function App() {
   // Handle clear chat
   const handleClearChat = () => {
     if (window.confirm('Are you sure you want to delete all messages? This cannot be undone.')) {
-      socket?.emit('delete-chat');
-      setMessages([]);
+      const messagesRef = ref(database, 'messages');
+      remove(messagesRef);
     }
   };
   
@@ -230,6 +230,15 @@ export default function App() {
   const formatTime = (timestamp: string) => {
     return format(new Date(timestamp), 'HH:mm');
   };
+  
+  // Add emoji to message
+  const addEmoji = (emoji: string) => {
+    setNewMessage(prev => prev + emoji);
+    messageInputRef.current?.focus();
+  };
+  
+  // Common emojis
+  const commonEmojis = ['😊', '😂', '❤️', '👍', '🙏', '😍', '🔥', '😎', '🤔', '👋', '😢', '🎉', '👏', '🌟', '💯', '💪', '🤗', '👀', '🙄', '😴'];
   
   return (
     <main className="chat-container">
@@ -246,8 +255,12 @@ export default function App() {
           <header className="chat-header">
             <h2>Chat {user === 'R' ? 'R' : 'B'}</h2>
             {otherUserTyping && <div className="typing-indicator">User {user === 'R' ? 'B' : 'R'} is typing...</div>}
-            <button onClick={handleLogout} className="logout-btn">Logout</button>
-            <button onClick={handleClearChat} className="clear-chat-btn">Clear Chat</button>
+            <button onClick={handleLogout} className="logout-btn">
+              <i className="icon-logout"></i>
+            </button>
+            <button onClick={handleClearChat} className="clear-chat-btn">
+              <i className="icon-trash"></i>
+            </button>
           </header>
           
           <div className="messages-container">
@@ -299,9 +312,23 @@ export default function App() {
               </div>
             )}
             
+            {showEmojiPicker && (
+              <div className="emoji-picker">
+                {commonEmojis.map(emoji => (
+                  <button 
+                    key={emoji} 
+                    className="emoji-btn" 
+                    onClick={() => addEmoji(emoji)}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+            
             <div className="input-container">
               <button onClick={() => fileInputRef.current?.click()} className="media-btn">
-                📷
+                <i className="icon-image"></i>
               </button>
               <input 
                 type="file"
@@ -310,6 +337,13 @@ export default function App() {
                 style={{ display: 'none' }}
                 accept="image/*"
               />
+              
+              <button 
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
+                className="emoji-toggle-btn"
+              >
+                <i className="icon-emoji"></i>
+              </button>
               
               <textarea
                 ref={messageInputRef}
@@ -322,7 +356,7 @@ export default function App() {
               />
               
               <button onClick={handleSendMessage} className="send-btn">
-                ➤
+                <i className="icon-send"></i>
               </button>
             </div>
           </div>
